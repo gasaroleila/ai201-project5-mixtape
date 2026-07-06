@@ -131,3 +131,23 @@ Checking the code found that indeed the last listened date on the user is not up
 
 ### The fix
 Added the user.last_listened_at = now line under the when days_since_last = 0 to also update the last time a user listened even if their streak isn't updated because they listened to more than one song on the same day. Now a user's last listened even matches the record of their last ListenEvent.
+
+### Issue 5:
+### How you reproduced it
+Added song to playlist 8d9cc22c-8415-40b4-93c2-11f3f5446a2a using
+
+{
+    "song_id": "87c73f05-5c83-4d3e-bd1c-cb12d211cfbd",
+    "added_by": "fd21f853-c9fe-4d34-9071-2384c2337a28"
+}
+
+but didn't show up in the songs on that playlist when I fetched using http://127.0.0.1:5000/playlists/8d9cc22c-8415-40b4-93c2-11f3f5446a2a/songs. Another song I had added earlier showed up after I added this one, meaning that the last song is always dropped.
+
+### How the root cause was found
+This is purely a fetching issue was my first guess, and so looking at /playlist/<id>/songs ing playlists route led to get_playlist_songs in playlist_service.
+
+### Root cause
+Looking at the code all songs are correctly fetched by their positions into the variable songs, but the return statement return [song.to_dict() for song in songs[:-1]] turns each song into a dictionary except the last song because of the explicit [:-1] on songs list.
+
+### The fix
+Remove the [:-1] because this returns every song up to the second to last song(not including the last song). All songs are returned also checked that if there are no songs on a playlist nothing extra is returned.
