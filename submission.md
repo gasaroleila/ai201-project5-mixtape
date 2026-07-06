@@ -67,3 +67,69 @@ results: the list returned by search_songs
 count: the number of matches
 
 Should look into what happens after search results are returned from database.
+
+## Root Cause Analysis
+
+### Issue 1: Sunday Only
+
+### How the bug was reproduced
+I simulated a normal streak by adding consecutive days to the current time using now = datetime.now(timezone.utc) + timedelta(days=2), then days=3, etc and creating a listening event on each day which resulted in a streak of 4 days(The first day of the streak was Wednesday Jul 08) when I reached on Sunday, I listened to a song again and the streak was reset to 1 when it should have added 1 to be streak: 5.
+
+{
+    "id": "8501342d-af91-4b2e-8b85-b5d3f15ca5f1",
+    "listened_at": "2026-07-12T02:41:53.777205",
+    "song_id": "02833a11-7d3a-48c7-8617-f24c508a198d",
+    "user_id": "d5e785e0-ecbb-4019-a729-783e02992c17"
+}
+
+{
+    "streak": 1,
+    "user_id": "d5e785e0-ecbb-4019-a729-783e02992c17"
+}
+
+Problem: Streak resets on Sunday.
+
+### How the root cause was found
+The API concerned is /songs/<song-id>/listen, this creates a ListeningEvent that calls record_listening_event which then calls update_listening_streak in streak_service. The bug happens when a user maintains a streak until Sunday when it resets so it has to do with a condition that resets the streak on this day.
+
+### The root cause
+This condition  "elif days_since_last == 1 and today.weekday() != 6:" explicity checks for consecutive listening as long as its not on Sunday 7. When it's on Sunday the condition doesn't pass and on a Sunday the else block ends up being executed which resets user.listening_streak = 1
+
+### The fix
+Removign the check today.weekday() != 6 to allow incrementing the streak even on Sunday. Checked that streak resets when they skip a day and that it increments even on Sunday. 
+
+### Issue 2: 
+After running GET http://127.0.0.1:5000/feed/d5e785e0-ecbb-4019-a729-783e02992c17/listening-now
+
+Found the last_listened_at on friend and listened_at to be different which shouldn't be right so flagged this as a potential bug that might be related to this
+
+     {
+            "friend": {
+                "id": "17201e18-c05a-436b-9a29-b61eeeed6eb8",
+                "last_listened_at": "2026-07-05T00:21:02.004376",
+                "listening_streak": 3,
+                "username": "darius"
+            },
+            "listened_at": "2026-07-06T00:11:02.004376",
+            ...
+        },
+        {
+            "friend": {
+                "id": "e91a283a-0afd-492e-ac47-11a43137bc00",
+                "last_listened_at": null,
+                "listening_streak": 0,
+                "username": "simone"
+            },
+            "listened_at": "2026-07-06T00:06:02.004376",
+
+Checking the code found that indeed the last listened date on the user is not updated when the user listened to songs on the same day. (ie days_since == 0) so the fetched friends come with an old last_listened_at that wasn't updated to match the external listened_at. This is a bug especially because in feed_service get_listening_now only filters by listened_at so the fetch person and last song is correct its just that fi they have listened to multiple songs in one day(days_since=0) their last_listened_at(on User model) won't be updated at all.
+
+### Issue 5:
+Added song to playlist 8d9cc22c-8415-40b4-93c2-11f3f5446a2a using
+
+{
+    "song_id": "87c73f05-5c83-4d3e-bd1c-cb12d211cfbd",
+    "added_by": "fd21f853-c9fe-4d34-9071-2384c2337a28"
+}
+
+but didn't show up in the songs on that playlist when I fetched using http://127.0.0.1:5000/playlists/8d9cc22c-8415-40b4-93c2-11f3f5446a2a/songs. Another song I had added earlier showed up after I added this one, meaning that the last song is always dropped.
