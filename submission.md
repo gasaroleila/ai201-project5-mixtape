@@ -98,7 +98,8 @@ This condition  "elif days_since_last == 1 and today.weekday() != 6:" explicity 
 ### The fix
 Removign the check today.weekday() != 6 to allow incrementing the streak even on Sunday. Checked that streak resets when they skip a day and that it increments even on Sunday. 
 
-### Issue 2: 
+### Issue 2: Friends Listening Now shows people from yesterday
+### How it was reproduced
 After running GET http://127.0.0.1:5000/feed/d5e785e0-ecbb-4019-a729-783e02992c17/listening-now
 
 Found the last_listened_at on friend and listened_at to be different which shouldn't be right so flagged this as a potential bug that might be related to this
@@ -122,14 +123,11 @@ Found the last_listened_at on friend and listened_at to be different which shoul
             },
             "listened_at": "2026-07-06T00:06:02.004376",
 
+### How the root cause was found
+Dug into the what /feed/<id>/listening-now calls. And it only fetches the recent listening events of a user's friends, but these are registered under the record_listening_event in streak_service. So the feed_services only fetches these friends's past 24 hour listening events, the fact that people from yesterday appear is related to how the friends' last_listened_at is updated. So navigated to streak_service>record_listening_event then update_listening_streak.
+
+### Root cause
 Checking the code found that indeed the last listened date on the user is not updated when the user listened to songs on the same day. (ie days_since == 0) so the fetched friends come with an old last_listened_at that wasn't updated to match the external listened_at. This is a bug especially because in feed_service get_listening_now only filters by listened_at so the fetch person and last song is correct its just that fi they have listened to multiple songs in one day(days_since=0) their last_listened_at(on User model) won't be updated at all.
 
-### Issue 5:
-Added song to playlist 8d9cc22c-8415-40b4-93c2-11f3f5446a2a using
-
-{
-    "song_id": "87c73f05-5c83-4d3e-bd1c-cb12d211cfbd",
-    "added_by": "fd21f853-c9fe-4d34-9071-2384c2337a28"
-}
-
-but didn't show up in the songs on that playlist when I fetched using http://127.0.0.1:5000/playlists/8d9cc22c-8415-40b4-93c2-11f3f5446a2a/songs. Another song I had added earlier showed up after I added this one, meaning that the last song is always dropped.
+### The fix
+Added the user.last_listened_at = now line under the when days_since_last = 0 to also update the last time a user listened even if their streak isn't updated because they listened to more than one song on the same day. Now a user's last listened even matches the record of their last ListenEvent.
